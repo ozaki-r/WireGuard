@@ -11,6 +11,10 @@
 #include <linux/genetlink.h>
 #include "mnlg.h"
 #endif
+#ifdef __NetBSD__
+#include <prop/proplib.h>
+#include <net/if_wg.h>
+#endif
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <net/if.h>
@@ -941,6 +945,228 @@ out:
 }
 #endif
 
+#ifdef __NetBSD__
+static int kernel_set_device(struct wgdevice *dev)
+{
+#if 0
+	int ret = 0;
+	size_t i, j;
+	struct wgpeer *peer = NULL;
+	struct wgallowedip *allowedip = NULL;
+	struct nlattr *peers_nest, *peer_nest, *allowedips_nest, *allowedip_nest;
+	struct nlmsghdr *nlh;
+	struct mnlg_socket *nlg;
+
+	nlg = mnlg_socket_open(WG_GENL_NAME, WG_GENL_VERSION);
+	if (!nlg)
+		return -errno;
+
+again:
+	nlh = mnlg_msg_prepare(nlg, WG_CMD_SET_DEVICE, NLM_F_REQUEST | NLM_F_ACK);
+	mnl_attr_put_strz(nlh, WGDEVICE_A_IFNAME, dev->name);
+
+	if (!peer) {
+		uint32_t flags = 0;
+
+		if (dev->flags & WGDEVICE_HAS_PRIVATE_KEY)
+			mnl_attr_put(nlh, WGDEVICE_A_PRIVATE_KEY, sizeof(dev->private_key), dev->private_key);
+		if (dev->flags & WGDEVICE_HAS_LISTEN_PORT)
+			mnl_attr_put_u16(nlh, WGDEVICE_A_LISTEN_PORT, dev->listen_port);
+		if (dev->flags & WGDEVICE_HAS_FWMARK)
+			mnl_attr_put_u32(nlh, WGDEVICE_A_FWMARK, dev->fwmark);
+		if (dev->flags & WGDEVICE_REPLACE_PEERS)
+			flags |= WGDEVICE_F_REPLACE_PEERS;
+		if (flags)
+			mnl_attr_put_u32(nlh, WGDEVICE_A_FLAGS, flags);
+	}
+	if (!dev->first_peer)
+		goto send;
+	peers_nest = peer_nest = allowedips_nest = allowedip_nest = NULL;
+	peers_nest = mnl_attr_nest_start(nlh, WGDEVICE_A_PEERS);
+	for (i = 0, peer = peer ? peer : dev->first_peer; peer; peer = peer->next_peer) {
+		uint32_t flags = 0;
+
+		peer_nest = mnl_attr_nest_start_check(nlh, SOCKET_BUFFER_SIZE, i++);
+		if (!peer_nest)
+			goto toobig_peers;
+		if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_PUBLIC_KEY, sizeof(peer->public_key), peer->public_key))
+			goto toobig_peers;
+		if (peer->flags & WGPEER_REMOVE_ME)
+			flags |= WGPEER_F_REMOVE_ME;
+		if (!allowedip) {
+			if (peer->flags & WGPEER_REPLACE_ALLOWEDIPS)
+				flags |= WGPEER_F_REPLACE_ALLOWEDIPS;
+			if (peer->flags & WGPEER_HAS_PRESHARED_KEY) {
+				if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_PRESHARED_KEY, sizeof(peer->preshared_key), peer->preshared_key))
+					goto toobig_peers;
+			}
+			if (peer->endpoint.addr.sa_family == AF_INET) {
+				if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_ENDPOINT, sizeof(peer->endpoint.addr4), &peer->endpoint.addr4))
+					goto toobig_peers;
+			} else if (peer->endpoint.addr.sa_family == AF_INET6) {
+				if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_ENDPOINT, sizeof(peer->endpoint.addr6), &peer->endpoint.addr6))
+					goto toobig_peers;
+			}
+			if (peer->flags & WGPEER_HAS_PERSISTENT_KEEPALIVE_INTERVAL) {
+				if (!mnl_attr_put_u16_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL, peer->persistent_keepalive_interval))
+					goto toobig_peers;
+			}
+		}
+		if (flags) {
+			if (!mnl_attr_put_u32_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_FLAGS, flags))
+				goto toobig_peers;
+		}
+		if (peer->first_allowedip) {
+			if (!allowedip)
+				allowedip = peer->first_allowedip;
+			allowedips_nest = mnl_attr_nest_start_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_ALLOWEDIPS);
+			if (!allowedips_nest)
+				goto toobig_allowedips;
+			for (j = 0; allowedip; allowedip = allowedip->next_allowedip) {
+				allowedip_nest = mnl_attr_nest_start_check(nlh, SOCKET_BUFFER_SIZE, j++);
+				if (!allowedip_nest)
+					goto toobig_allowedips;
+				if (!mnl_attr_put_u16_check(nlh, SOCKET_BUFFER_SIZE, WGALLOWEDIP_A_FAMILY, allowedip->family))
+					goto toobig_allowedips;
+				if (allowedip->family == AF_INET) {
+					if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, WGALLOWEDIP_A_IPADDR, sizeof(allowedip->ip4), &allowedip->ip4))
+						goto toobig_allowedips;
+				} else if (allowedip->family == AF_INET6) {
+					if (!mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, WGALLOWEDIP_A_IPADDR, sizeof(allowedip->ip6), &allowedip->ip6))
+						goto toobig_allowedips;
+				}
+				if (!mnl_attr_put_u8_check(nlh, SOCKET_BUFFER_SIZE, WGALLOWEDIP_A_CIDR_MASK, allowedip->cidr))
+					goto toobig_allowedips;
+				mnl_attr_nest_end(nlh, allowedip_nest);
+				allowedip_nest = NULL;
+			}
+			mnl_attr_nest_end(nlh, allowedips_nest);
+			allowedips_nest = NULL;
+		}
+
+		mnl_attr_nest_end(nlh, peer_nest);
+		peer_nest = NULL;
+	}
+	mnl_attr_nest_end(nlh, peers_nest);
+	peers_nest = NULL;
+	goto send;
+toobig_allowedips:
+	if (allowedip_nest)
+		mnl_attr_nest_cancel(nlh, allowedip_nest);
+	if (allowedips_nest)
+		mnl_attr_nest_end(nlh, allowedips_nest);
+	mnl_attr_nest_end(nlh, peer_nest);
+	mnl_attr_nest_end(nlh, peers_nest);
+	goto send;
+toobig_peers:
+	if (peer_nest)
+		mnl_attr_nest_cancel(nlh, peer_nest);
+	mnl_attr_nest_end(nlh, peers_nest);
+	goto send;
+send:
+	if (mnlg_socket_send(nlg, nlh) < 0) {
+		ret = -errno;
+		goto out;
+	}
+	errno = 0;
+	if (mnlg_socket_recv_run(nlg, NULL, NULL) < 0) {
+		ret = errno ? -errno : -EINVAL;
+		goto out;
+	}
+	if (peer)
+		goto again;
+
+out:
+	mnlg_socket_close(nlg);
+	errno = -ret;
+	return ret;
+#else
+	int ret = 0;
+	//size_t i, j;
+	struct wgpeer *peer = NULL;
+	//struct wgallowedip *allowedip = NULL;
+#if 0
+	struct nlattr *peers_nest, *peer_nest, *allowedips_nest, *allowedip_nest;
+	struct nlmsghdr *nlh;
+	struct mnlg_socket *nlg;
+#endif
+	prop_dictionary_t prop_dict;
+	struct ifreq ifr;
+
+	prop_dict = prop_dictionary_create();
+	// if (prop_dict == NULL)
+
+#if 0
+	nlg = mnlg_socket_open(WG_GENL_NAME, WG_GENL_VERSION);
+	if (!nlg)
+		return -errno;
+#endif
+
+#if 0
+again:
+	nlh = mnlg_msg_prepare(nlg, WG_CMD_SET_DEVICE, NLM_F_REQUEST | NLM_F_ACK);
+	mnl_attr_put_strz(nlh, WGDEVICE_A_IFNAME, dev->name);
+#endif
+
+	if (!peer) {
+		//uint32_t flags = 0;
+
+		if (dev->flags & WGDEVICE_HAS_PRIVATE_KEY) {
+			//mnl_attr_put(nlh, WGDEVICE_A_PRIVATE_KEY, sizeof(dev->private_key), dev->private_key);
+			prop_data_t privkey = prop_data_create_data(dev->private_key, sizeof(dev->private_key));
+			//if (privkey == NULL)
+			prop_dictionary_set(prop_dict, "private_key", privkey);
+			prop_object_release(privkey);
+		}
+#if 0
+		if (dev->flags & WGDEVICE_HAS_LISTEN_PORT)
+			mnl_attr_put_u16(nlh, WGDEVICE_A_LISTEN_PORT, dev->listen_port);
+		if (dev->flags & WGDEVICE_HAS_FWMARK)
+			mnl_attr_put_u32(nlh, WGDEVICE_A_FWMARK, dev->fwmark);
+		if (dev->flags & WGDEVICE_REPLACE_PEERS)
+			flags |= WGDEVICE_F_REPLACE_PEERS;
+		if (flags)
+			mnl_attr_put_u32(nlh, WGDEVICE_A_FLAGS, flags);
+#endif
+	}
+#if 0
+	if (!dev->first_peer)
+		goto send;
+send:
+	if (mnlg_socket_send(nlg, nlh) < 0) {
+		ret = -errno;
+		goto out;
+	}
+	errno = 0;
+	if (mnlg_socket_recv_run(nlg, NULL, NULL) < 0) {
+		ret = errno ? -errno : -EINVAL;
+		goto out;
+	}
+	if (peer)
+		goto again;
+
+out:
+	mnlg_socket_close(nlg);
+	errno = -ret;
+#endif
+
+	int sock = socket(AF_INET, SOCK_DGRAM, 0);
+	strlcpy(ifr.ifr_name, dev->name, sizeof(ifr.ifr_name));
+	char *buf = prop_dictionary_externalize(prop_dict);
+	if (buf == NULL)
+		abort();
+	prop_dictionary_t tmp = prop_dictionary_internalize(buf);
+	if (tmp == NULL)
+		abort();
+	ifr.ifr_buf = buf;
+	ifr.ifr_buflen = strlen(buf);
+	ret = ioctl(sock, SIOCSWG, &ifr);
+
+	return ret;
+#endif
+}
+#endif /* __NetBSD__ */
+
 /* first\0second\0third\0forth\0last\0\0 */
 char *ipc_list_devices(void)
 {
@@ -983,7 +1209,7 @@ int ipc_get_device(struct wgdevice **dev, const char *interface)
 
 int ipc_set_device(struct wgdevice *dev)
 {
-#ifdef __linux__
+#if defined(__linux__) || defined(__NetBSD__)
 	if (userspace_has_wireguard_interface(dev->name))
 		return userspace_set_device(dev);
 	return kernel_set_device(dev);

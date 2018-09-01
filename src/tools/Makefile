@@ -51,6 +51,9 @@ LIBMNL_LDLIBS := $(shell $(PKG_CONFIG) --libs libmnl 2>/dev/null || echo -lmnl)
 CFLAGS += $(LIBMNL_CFLAGS)
 LDLIBS += $(LIBMNL_LDLIBS)
 endif
+ifeq ($(PLATFORM),netbsd)
+LDLIBS += -lprop
+endif
 
 ifneq ($(V),1)
 BUILT_IN_LINK.o := $(LINK.o)
