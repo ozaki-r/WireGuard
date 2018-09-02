@@ -1155,13 +1155,86 @@ out:
 	char *buf = prop_dictionary_externalize(prop_dict);
 	if (buf == NULL)
 		abort();
+#if 0
 	prop_dictionary_t tmp = prop_dictionary_internalize(buf);
 	if (tmp == NULL)
 		abort();
+#endif
 	ifr.ifr_buf = buf;
 	ifr.ifr_buflen = strlen(buf);
 	ret = ioctl(sock, SIOCSWG, &ifr);
 
+	return ret;
+#endif
+}
+
+static int kernel_get_device(struct wgdevice **device, const char *interface)
+{
+	int ret = 0;
+
+	*device = calloc(1, sizeof(struct wgdevice));
+	if (!*device)
+		return -errno;
+
+#define PROP_BUFFER_SIZE	4096
+	struct ifreq ifr;
+	int sock = socket(AF_INET, SOCK_DGRAM, 0);
+	strlcpy(ifr.ifr_name, interface, sizeof(ifr.ifr_name));
+	char *buf = malloc(PROP_BUFFER_SIZE);
+	if (buf == NULL)
+		abort();
+	ifr.ifr_buf = buf;
+	ifr.ifr_buflen = PROP_BUFFER_SIZE;
+	ret = ioctl(sock, SIOCGWG, &ifr);
+	if (ret == -1)
+		return -errno;
+	prop_dictionary_t prop_dict = prop_dictionary_internalize(buf);
+	if (prop_dict == NULL)
+		abort();
+	prop_object_t prop_obj = prop_dictionary_get(prop_dict, "private_key");
+	if (prop_obj != NULL) {
+		char *privkey;
+		size_t privkey_len;
+		privkey = prop_data_data(prop_obj);
+		privkey_len = prop_data_size(prop_obj);
+		if (privkey_len != sizeof((*device)->private_key))
+			return EINVAL;
+		memcpy((*device)->private_key, privkey, sizeof((*device)->private_key));
+		(*device)->flags |= WGDEVICE_HAS_PRIVATE_KEY;
+	}
+	return ret;
+
+#if 0
+	nlg = mnlg_socket_open(WG_GENL_NAME, WG_GENL_VERSION);
+	if (!nlg) {
+		free_wgdevice(*device);
+		*device = NULL;
+		return -errno;
+	}
+
+	nlh = mnlg_msg_prepare(nlg, WG_CMD_GET_DEVICE, NLM_F_REQUEST | NLM_F_ACK | NLM_F_DUMP);
+	mnl_attr_put_strz(nlh, WGDEVICE_A_IFNAME, interface);
+	if (mnlg_socket_send(nlg, nlh) < 0) {
+		ret = -errno;
+		goto out;
+	}
+	errno = 0;
+	if (mnlg_socket_recv_run(nlg, read_device_cb, *device) < 0) {
+		ret = errno ? -errno : -EINVAL;
+		goto out;
+	}
+	coalesce_peers(*device);
+
+out:
+	if (nlg)
+		mnlg_socket_close(nlg);
+	if (ret) {
+		free_wgdevice(*device);
+		if (ret == -EINTR)
+			goto try_again;
+		*device = NULL;
+	}
+	errno = -ret;
 	return ret;
 #endif
 }
@@ -1198,7 +1271,7 @@ cleanup:
 
 int ipc_get_device(struct wgdevice **dev, const char *interface)
 {
-#ifdef __linux__
+#if defined(__linux__) || defined(__NetBSD__)
 	if (userspace_has_wireguard_interface(interface))
 		return userspace_get_device(dev, interface);
 	return kernel_get_device(dev, interface);
