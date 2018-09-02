@@ -1129,9 +1129,45 @@ again:
 			mnl_attr_put_u32(nlh, WGDEVICE_A_FLAGS, flags);
 #endif
 	}
-#if 0
 	if (!dev->first_peer)
 		goto send;
+
+	//peers_nest = peer_nest = allowedips_nest = allowedip_nest = NULL;
+	//peers_nest = mnl_attr_nest_start(nlh, WGDEVICE_A_PEERS);
+	prop_array_t peers = prop_array_create();
+	// if (peers == NULL)
+	int i;
+	for (i = 0, peer = peer ? peer : dev->first_peer; peer; peer = peer->next_peer) {
+		//uint32_t flags = 0;
+
+		prop_dictionary_t prop_peer;
+		prop_peer = prop_dictionary_create();
+
+		prop_data_t pubkey = prop_data_create_data(peer->public_key, sizeof(peer->public_key));
+		//if (pubkey == NULL)
+		prop_dictionary_set(prop_peer, "public_key", pubkey);
+		prop_object_release(pubkey);
+
+		//if (!allowedip) {
+			if (peer->endpoint.addr.sa_family == AF_INET) {
+				prop_data_t addr = prop_data_create_data(&peer->endpoint.addr4, sizeof(peer->endpoint.addr4));
+				//if (addr == NULL)
+				prop_dictionary_set(prop_peer, "endpoint", addr);
+				prop_object_release(addr);
+			} else if (peer->endpoint.addr.sa_family == AF_INET6) {
+				prop_data_t addr = prop_data_create_data(&peer->endpoint.addr6, sizeof(peer->endpoint.addr6));
+				//if (addr == NULL)
+				prop_dictionary_set(prop_peer, "endpoint", addr);
+				prop_object_release(addr);
+			}
+		//}
+		prop_array_set(peers, i, prop_peer);
+	}
+	prop_dictionary_set(prop_dict, "peers", peers);
+	//mnl_attr_nest_end(nlh, peers_nest);
+	//peers_nest = NULL;
+	goto send;
+#if 0
 send:
 	if (mnlg_socket_send(nlg, nlh) < 0) {
 		ret = -errno;
@@ -1149,8 +1185,9 @@ out:
 	mnlg_socket_close(nlg);
 	errno = -ret;
 #endif
-
-	int sock = socket(AF_INET, SOCK_DGRAM, 0);
+	int sock;
+send:
+	sock = socket(AF_INET, SOCK_DGRAM, 0);
 	strlcpy(ifr.ifr_name, dev->name, sizeof(ifr.ifr_name));
 	char *buf = prop_dictionary_externalize(prop_dict);
 	if (buf == NULL)
@@ -1198,7 +1235,7 @@ static int kernel_get_device(struct wgdevice **device, const char *interface)
 		privkey = prop_data_data(prop_obj);
 		privkey_len = prop_data_size(prop_obj);
 		if (privkey_len != sizeof((*device)->private_key))
-			return EINVAL;
+			return -EINVAL;
 		memcpy((*device)->private_key, privkey, sizeof((*device)->private_key));
 		(*device)->flags |= WGDEVICE_HAS_PRIVATE_KEY;
 	}
