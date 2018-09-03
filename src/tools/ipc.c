@@ -1205,13 +1205,16 @@ send:
 #endif
 }
 
-static int kernel_get_device(struct wgdevice **device, const char *interface)
+static int kernel_get_device(struct wgdevice **devicep, const char *interface)
 {
 	int ret = 0;
+	struct wgdevice *device;
 
-	*device = calloc(1, sizeof(struct wgdevice));
-	if (!*device)
+	*devicep = calloc(1, sizeof(struct wgdevice));
+	if (!*devicep)
 		return -errno;
+
+	device = *devicep;
 
 #define PROP_BUFFER_SIZE	4096
 	struct ifreq ifr;
@@ -1234,10 +1237,67 @@ static int kernel_get_device(struct wgdevice **device, const char *interface)
 		size_t privkey_len;
 		privkey = prop_data_data(prop_obj);
 		privkey_len = prop_data_size(prop_obj);
-		if (privkey_len != sizeof((*device)->private_key))
+		if (privkey_len != sizeof(device->private_key))
 			return -EINVAL;
-		memcpy((*device)->private_key, privkey, sizeof((*device)->private_key));
-		(*device)->flags |= WGDEVICE_HAS_PRIVATE_KEY;
+		memcpy(device->private_key, privkey, sizeof(device->private_key));
+		device->flags |= WGDEVICE_HAS_PRIVATE_KEY;
+	}
+
+	prop_array_t peers = prop_dictionary_get(prop_dict, "peers");
+	if (peers == NULL)
+		return 0;
+
+	prop_object_iterator_t it = prop_array_iterator(peers);
+	prop_dictionary_t peer;
+	while ((peer = prop_object_iterator_next(it)) != NULL) {
+		struct wgpeer *new_peer;
+
+		new_peer = calloc(1, sizeof(struct wgpeer));
+		if (!new_peer) {
+			perror("calloc");
+			return -ENOMEM;
+		}
+		if (!device->first_peer)
+			device->first_peer = device->last_peer = new_peer;
+		else {
+			device->last_peer->next_peer = new_peer;
+			device->last_peer = new_peer;
+		}
+
+		prop_obj = prop_dictionary_get(peer, "public_key");
+		if (prop_obj != NULL) {
+			char *pubkey;
+			size_t pubkey_len;
+
+			pubkey = prop_data_data(prop_obj);
+			pubkey_len = prop_data_size(prop_obj);
+			memcpy(new_peer->public_key, pubkey, pubkey_len);
+			new_peer->flags |= WGPEER_HAS_PUBLIC_KEY;
+		}
+
+		prop_obj = prop_dictionary_get(peer, "endpoint");
+		if (prop_obj != NULL) {
+			struct sockaddr_storage sockaddr;
+			char *addr;
+			size_t addr_len;
+
+			addr = prop_data_data(prop_obj);
+			addr_len = prop_data_size(prop_obj);
+			memcpy(&sockaddr, addr, addr_len);
+			switch (sockaddr.ss_family) {
+			case AF_INET: {
+				if (addr_len == sizeof(new_peer->endpoint.addr4))
+					memcpy(&new_peer->endpoint.addr4, addr, addr_len);
+				break;
+			     }
+			case AF_INET6:
+				if (addr_len == sizeof(new_peer->endpoint.addr6))
+					memcpy(&new_peer->endpoint.addr6, addr, addr_len);
+				break;
+			default:
+				break;
+			}
+		}
 	}
 	return ret;
 
