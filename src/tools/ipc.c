@@ -1118,9 +1118,13 @@ again:
 			prop_dictionary_set(prop_dict, "private_key", privkey);
 			prop_object_release(privkey);
 		}
+		if (dev->flags & WGDEVICE_HAS_LISTEN_PORT) {
+			prop_number_t port = prop_number_create_unsigned_integer(dev->listen_port);
+			//if (port == NULL)
+			prop_dictionary_set(prop_dict, "listen_port", port);
+			prop_object_release(port);
+		}
 #if 0
-		if (dev->flags & WGDEVICE_HAS_LISTEN_PORT)
-			mnl_attr_put_u16(nlh, WGDEVICE_A_LISTEN_PORT, dev->listen_port);
 		if (dev->flags & WGDEVICE_HAS_FWMARK)
 			mnl_attr_put_u32(nlh, WGDEVICE_A_FWMARK, dev->fwmark);
 		if (dev->flags & WGDEVICE_REPLACE_PEERS)
@@ -1241,6 +1245,14 @@ static int kernel_get_device(struct wgdevice **devicep, const char *interface)
 			return -EINVAL;
 		memcpy(device->private_key, privkey, sizeof(device->private_key));
 		device->flags |= WGDEVICE_HAS_PRIVATE_KEY;
+	}
+
+	prop_obj = prop_dictionary_get(prop_dict, "listen_port");
+	if (prop_obj != NULL) {
+		uint64_t port = prop_number_unsigned_integer_value(prop_obj);
+		if (port != (uint64_t)(uint16_t)port)
+			return -EINVAL;
+		device->listen_port = (uint16_t)port;
 	}
 
 	prop_array_t peers = prop_dictionary_get(prop_dict, "peers");
