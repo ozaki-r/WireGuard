@@ -1310,6 +1310,17 @@ static int kernel_get_device(struct wgdevice **devicep, const char *interface)
 				break;
 			}
 		}
+
+		prop_obj = prop_dictionary_get(peer, "last_handshake_time_sec");
+		if (prop_obj != NULL) {
+			uint64_t sec = prop_number_unsigned_integer_value(prop_obj);
+			new_peer->last_handshake_time.tv_sec = sec;
+		}
+		prop_obj = prop_dictionary_get(peer, "last_handshake_time_nsec");
+		if (prop_obj != NULL) {
+			uint64_t nsec = prop_number_unsigned_integer_value(prop_obj);
+			new_peer->last_handshake_time.tv_nsec = nsec;
+		}
 	}
 	return ret;
 
