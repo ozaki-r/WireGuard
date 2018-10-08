@@ -1084,7 +1084,7 @@ out:
 	int ret = 0;
 	//size_t i, j;
 	struct wgpeer *peer = NULL;
-	//struct wgallowedip *allowedip = NULL;
+	struct wgallowedip *allowedip = NULL;
 #if 0
 	struct nlattr *peers_nest, *peer_nest, *allowedips_nest, *allowedip_nest;
 	struct nlmsghdr *nlh;
@@ -1165,6 +1165,36 @@ again:
 				prop_object_release(addr);
 			}
 		//}
+
+		if (peer->first_allowedip) {
+			if (!allowedip)
+				allowedip = peer->first_allowedip;
+			prop_array_t allowedips = prop_array_create();
+
+			for (; allowedip; allowedip = allowedip->next_allowedip) {
+				prop_dictionary_t prop_allowedip;
+				prop_allowedip = prop_dictionary_create();
+
+				prop_number_t family = prop_number_create_unsigned_integer(allowedip->family);
+				prop_dictionary_set(prop_allowedip, "family", family);
+				prop_object_release(family);
+
+				prop_data_t addr;
+				if (allowedip->family == AF_INET)
+					addr = prop_data_create_data(&allowedip->ip4, sizeof(allowedip->ip4));
+				else // allowedip->family == AF_INET6
+					addr = prop_data_create_data(&allowedip->ip6, sizeof(allowedip->ip6));
+				prop_dictionary_set(prop_allowedip, "ip", addr);
+				prop_object_release(addr);
+
+				prop_number_t cidr = prop_number_create_unsigned_integer(allowedip->cidr);
+				prop_dictionary_set(prop_allowedip, "cidr", cidr);
+				prop_object_release(cidr);
+
+				prop_array_set(allowedips, i, prop_allowedip);
+			}
+			prop_dictionary_set(prop_peer, "allowedips", allowedips);
+		}
 		prop_array_set(peers, i, prop_peer);
 	}
 	prop_dictionary_set(prop_dict, "peers", peers);
