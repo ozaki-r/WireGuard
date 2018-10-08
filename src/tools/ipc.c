@@ -1351,6 +1351,52 @@ static int kernel_get_device(struct wgdevice **devicep, const char *interface)
 			uint64_t nsec = prop_number_unsigned_integer_value(prop_obj);
 			new_peer->last_handshake_time.tv_nsec = nsec;
 		}
+
+		prop_array_t allowedips = prop_dictionary_get(peer, "allowedips");
+		if (allowedips == NULL)
+			continue;
+
+		prop_object_iterator_t it = prop_array_iterator(allowedips);
+		prop_dictionary_t allowedip;
+		while ((allowedip = prop_object_iterator_next(it)) != NULL) {
+			struct wgallowedip *new_allowedip;
+
+			new_allowedip = calloc(1, sizeof(struct wgallowedip));
+
+			if (!new_allowedip) {
+				perror("calloc");
+				return -ENOMEM;
+			}
+			if (new_peer->first_allowedip)
+				new_peer->first_allowedip->next_allowedip = new_allowedip;
+			else
+				new_peer->first_allowedip = new_allowedip;
+
+			prop_obj = prop_dictionary_get(allowedip, "family");
+			if (prop_obj != NULL) {
+				uint64_t family = prop_number_unsigned_integer_value(prop_obj);
+				new_allowedip->family = family;
+			}
+
+			prop_obj = prop_dictionary_get(allowedip, "cidr");
+			if (prop_obj != NULL) {
+				uint64_t cidr = prop_number_unsigned_integer_value(prop_obj);
+				new_allowedip->cidr = cidr;
+			}
+			prop_obj = prop_dictionary_get(allowedip, "ip");
+			if (prop_obj != NULL) {
+				char *addr;
+				size_t addr_len;
+
+				addr = prop_data_data(prop_obj);
+				addr_len = prop_data_size(prop_obj);
+				if (addr_len == sizeof(new_allowedip->ip4)) {
+					memcpy(&new_allowedip->ip4, addr, addr_len);
+				}
+				else if (addr_len == sizeof(new_allowedip->ip6))
+					memcpy(&new_allowedip->ip6, addr, addr_len);
+			}
+		}
 	}
 	return ret;
 
