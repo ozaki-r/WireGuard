@@ -1171,6 +1171,7 @@ again:
 				allowedip = peer->first_allowedip;
 			prop_array_t allowedips = prop_array_create();
 
+			int j = 0;
 			for (; allowedip; allowedip = allowedip->next_allowedip) {
 				prop_dictionary_t prop_allowedip;
 				prop_allowedip = prop_dictionary_create();
@@ -1191,7 +1192,8 @@ again:
 				prop_dictionary_set(prop_allowedip, "cidr", cidr);
 				prop_object_release(cidr);
 
-				prop_array_set(allowedips, i, prop_allowedip);
+				prop_array_set(allowedips, j, prop_allowedip);
+				j++;
 			}
 			prop_dictionary_set(prop_peer, "allowedips", allowedips);
 		}
