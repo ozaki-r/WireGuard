@@ -1142,7 +1142,7 @@ again:
 	// if (peers == NULL)
 	int i;
 	for (i = 0, peer = peer ? peer : dev->first_peer; peer; peer = peer->next_peer) {
-		//uint32_t flags = 0;
+		uint32_t flags = 0;
 
 		prop_dictionary_t prop_peer;
 		prop_peer = prop_dictionary_create();
@@ -1152,6 +1152,12 @@ again:
 		prop_dictionary_set(prop_peer, "public_key", pubkey);
 		prop_object_release(pubkey);
 
+		if (peer->flags & WGPEER_REMOVE_ME) {
+			flags |= WGPEER_F_REMOVE_ME;
+			prop_number_t prop_flags = prop_number_create_unsigned_integer(flags);
+			prop_dictionary_set(prop_peer, "flags", prop_flags);
+			prop_object_release(prop_flags);
+		}
 		//if (!allowedip) {
 			if (peer->endpoint.addr.sa_family == AF_INET) {
 				prop_data_t addr = prop_data_create_data(&peer->endpoint.addr4, sizeof(peer->endpoint.addr4));
