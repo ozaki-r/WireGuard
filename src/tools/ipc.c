@@ -1158,6 +1158,12 @@ again:
 			prop_dictionary_set(prop_peer, "flags", prop_flags);
 			prop_object_release(prop_flags);
 		}
+		if (peer->flags & WGPEER_HAS_PRESHARED_KEY) {
+			prop_data_t psk = prop_data_create_data(peer->preshared_key, sizeof(peer->preshared_key));
+			//if (psk == NULL)
+			prop_dictionary_set(prop_peer, "preshared_key", psk);
+			prop_object_release(psk);
+		}
 		//if (!allowedip) {
 			if (peer->endpoint.addr.sa_family == AF_INET) {
 				prop_data_t addr = prop_data_create_data(&peer->endpoint.addr4, sizeof(peer->endpoint.addr4));
@@ -1323,6 +1329,19 @@ static int kernel_get_device(struct wgdevice **devicep, const char *interface)
 			pubkey_len = prop_data_size(prop_obj);
 			memcpy(new_peer->public_key, pubkey, pubkey_len);
 			new_peer->flags |= WGPEER_HAS_PUBLIC_KEY;
+		}
+
+		prop_obj = prop_dictionary_get(peer, "preshared_key");
+		if (prop_obj != NULL) {
+			char *psk;
+			size_t psk_len;
+
+			psk = prop_data_data(prop_obj);
+			psk_len = prop_data_size(prop_obj);
+			if (psk_len == sizeof(new_peer->preshared_key)) {
+				memcpy(new_peer->preshared_key, psk, psk_len);
+				new_peer->flags |= WGPEER_HAS_PRESHARED_KEY;
+			}
 		}
 
 		prop_obj = prop_dictionary_get(peer, "endpoint");
