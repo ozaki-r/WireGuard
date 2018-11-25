@@ -1091,7 +1091,7 @@ out:
 	struct mnlg_socket *nlg;
 #endif
 	prop_dictionary_t prop_dict;
-	struct ifreq ifr;
+	struct ifdrv ifd;
 
 	prop_dict = prop_dictionary_create();
 	// if (prop_dict == NULL)
@@ -1236,7 +1236,7 @@ out:
 	int sock;
 send:
 	sock = socket(AF_INET, SOCK_DGRAM, 0);
-	strlcpy(ifr.ifr_name, dev->name, sizeof(ifr.ifr_name));
+	strlcpy(ifd.ifd_name, dev->name, sizeof(ifd.ifd_name));
 	char *buf = prop_dictionary_externalize(prop_dict);
 	if (buf == NULL)
 		abort();
@@ -1245,9 +1245,10 @@ send:
 	if (tmp == NULL)
 		abort();
 #endif
-	ifr.ifr_buf = buf;
-	ifr.ifr_buflen = strlen(buf);
-	ret = ioctl(sock, SIOCSWG, &ifr);
+	ifd.ifd_cmd = 0;
+	ifd.ifd_data = buf;
+	ifd.ifd_len = strlen(buf);
+	ret = ioctl(sock, SIOCSDRVSPEC, &ifd);
 
 	return ret;
 #endif
@@ -1265,15 +1266,16 @@ static int kernel_get_device(struct wgdevice **devicep, const char *interface)
 	device = *devicep;
 
 #define PROP_BUFFER_SIZE	4096
-	struct ifreq ifr;
+	struct ifdrv ifd;
 	int sock = socket(AF_INET, SOCK_DGRAM, 0);
-	strlcpy(ifr.ifr_name, interface, sizeof(ifr.ifr_name));
+	strlcpy(ifd.ifd_name, interface, sizeof(ifd.ifd_name));
 	char *buf = malloc(PROP_BUFFER_SIZE);
 	if (buf == NULL)
 		abort();
-	ifr.ifr_buf = buf;
-	ifr.ifr_buflen = PROP_BUFFER_SIZE;
-	ret = ioctl(sock, SIOCGWG, &ifr);
+	ifd.ifd_cmd = 0;
+	ifd.ifd_data = buf;
+	ifd.ifd_len = PROP_BUFFER_SIZE;
+	ret = ioctl(sock, SIOCGDRVSPEC, &ifd);
 	if (ret == -1)
 		return -errno;
 	prop_dictionary_t prop_dict = prop_dictionary_internalize(buf);
